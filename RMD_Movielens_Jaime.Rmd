@@ -1,0 +1,349 @@
+---
+title: "Jaime Prades Movielens"
+author: "Jaime Prades"
+date: "mar 2023 - Chile"
+output: pdf_document
+---
+
+  
+## Introduction section: Exploratory analysis and project's goal. 
+In this project, I will utilize the MovieLens dataset which consists of over 10 million ratings for over 10,000 movies by around 70,000 users. The dataset includes various information such as the identification of the users and movies, movie ratings, and movie genre.
+
+The primary objective of this project is to predict movie ratings based on the provided dataset and its various features. To achieve this goal, the dataset will be divided into two groups - the training set and the validation set ("final holdout test"). The validation set, accounting for 10% of the original data, will not be used in the model construction but rather to validate the model's performance and allow for comparisons between different models.
+
+In my opinion, dividing the data into the training and validation sets is a crucial step in the model creation process. This is because the ultimate goal of Machine Learning is to generalize beyond the training data observations. We want to evaluate the model's ability to generalize for data that it has not seen before, as the future observations are unknown and we cannot directly verify the accuracy of our predictions for them.
+
+Using the validation set as a proxy for future data helps us to estimate the quality of the model's generalization. Evaluating the model using the same data that was used for training is not useful as it could lead to overfitting, where the model simply "remembers" the training data rather than generalizing.
+
+
+```{r Creat test and validation sets, echo=FALSE, message=FALSE, warning=FALSE}
+#############################################################
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(dslabs)) install.packages("dslabs", repos = "http://cran.us.r-project.org")
+if(!require(rafalib)) install.packages("refalib", repos = "http://cran.us.r-project.org")
+if(!require(ggpubr)) install.packages("ggpubr", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+if(!require(dataCompareR)) install.packages("dataCompareR", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(markdown)) install.packages("markdown", repos = "http://cran.us.r-project.org")
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+if(!require(tidyr)) install.packages("tidyr", repos = "http://cran.us.r-project.org")
+if(!require(ggthemes)) install.packages("ggthemes", repos = "http://cran.us.r-project.org")
+
+
+library(dslabs)
+library(tidyverse)
+library(caret)
+library(data.table)
+library(rafalib)
+library(ggpubr)
+library(knitr)  
+library(dataCompareR)
+library(ggplot2)
+library(dplyr)
+library(markdown)
+library(kableExtra)
+library(tidyr)
+library(stringr)
+library(ggthemes)
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+options(timeout = 120)
+
+dl <- "ml-10M100K.zip"
+if(!file.exists(dl))
+  download.file("https://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings_file <- "ml-10M100K/ratings.dat"
+if(!file.exists(ratings_file))
+  unzip(dl, ratings_file)
+
+movies_file <- "ml-10M100K/movies.dat"
+if(!file.exists(movies_file))
+  unzip(dl, movies_file)
+
+ratings <- as.data.frame(str_split(read_lines(ratings_file), fixed("::"), simplify = TRUE),
+                         stringsAsFactors = FALSE)
+colnames(ratings) <- c("userId", "movieId", "rating", "timestamp")
+ratings <- ratings %>%
+  mutate(userId = as.integer(userId),
+         movieId = as.integer(movieId),
+         rating = as.numeric(rating),
+         timestamp = as.integer(timestamp))
+
+movies <- as.data.frame(str_split(read_lines(movies_file), fixed("::"), simplify = TRUE),
+                        stringsAsFactors = FALSE)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- movies %>%
+  mutate(movieId = as.integer(movieId))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# Final hold-out test set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding") # if using R 3.6 or later
+# set.seed(1) # if using R 3.5 or earlier
+test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in final hold-out test set are also in edx set
+final_holdout_test <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from final hold-out test set back into edx set
+removed <- anti_join(temp, final_holdout_test)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+
+```
+
+
+Let's begin with an exploratory analysis of the dataset. The MovieLens dataset contains exactly `r (nrow(edx)+nrow(final_holdout_test))` observations and has `r length(unique(edx$userId))` unique users who have provided ratings and `r length(unique(edx$movieId))` unique movies that have been rated. As you can see, there is a vast amount of information available for inclusion in the model.
+
+The most crucial factor in determining the quality of a movie is its rating, which ranges from 1 to 5. Let's examine its distribution:
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+# Rating histogram
+
+full_data <- rbind(edx,final_holdout_test)
+final_holdout_test %>% ggplot(aes(rating)) +
+  geom_histogram(fill = "brown") +
+  labs(title = "Distribution of ratings in a histogram",
+  x = "Ratings", y = "Count", fill = element_blank()) +
+  theme_economist()
+```
+
+An interesting observation from the histogram of ratings is that integer ratings are more frequent than half-integer ratings.
+
+Now, let's focus on the genre attribute in the dataset. The list of genres can be seen here:
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+str_extract_all(unique(full_data$genres), "[^|]+") %>% unlist() %>% unique()
+```
+
+It is also worthwhile to investigate if all movies are rated equally, or if certain types of movies receive more ratings than others. To do this, I created a plot that displays the number of times movies of each genre were rated.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+ggplot(final_holdout_test %>% separate_rows(genres, sep = "\\|", convert = TRUE),
+       aes(x = reorder(genres, genres, function(x) -length(x)))) +
+       geom_bar(fill = "brown") +
+       labs(title = "Distribution of ratings per genre", x = "Genre", y = "Counts") +
+       coord_flip() +
+       theme_economist()
+```
+
+
+As observed, the most highly rated genres are Drama and Comedy.
+Now, let's combine the information on ratings with the genre information. To visualize this, I created a boxplot of the rating distribution per genre, which can be seen below:
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+# Creating the long version of both the train and validation datasets. With separeted genres
+sample_data <- full_data[1:(0.01*nrow(full_data)),]
+ggplot(sample_data %>%
+         separate_rows(genres, sep = "\\|", convert = TRUE), aes(genres, rating)) +
+  geom_boxplot(fill = "steelblue", varwidth = TRUE) +
+  labs(
+    title = "Movie ratings per genre",
+    x = "Genre", y = "Rating", fill = element_blank()
+  ) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+rm(full_data, sample_data)
+```
+
+
+
+
+## Analysis section. The Models creation.
+
+Now that we have a better understanding of the dataset, let's move on to creating the recommendation model. From this point forward, I will use the "edx" dataset to train the model and the "final_holdout_test" dataset to test it.
+
+The methodology I have chosen is to start with basic models (the ones covered in the "Machine Learning" course) and gradually progress to more advanced ones. I will use the Root Mean Square Error (RMSE) to compare the models. For the RMSE, LESS is BETTER, and you will see the RMSE decrease as the model becomes more complex. The RMSE is defined by the following function:
+
+
+  ```{r}
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+# First Model: Only the rating's mean
+
+The simplest model is to predict the same rating for all movies, regardless of the user or genre. To achieve this, I calculated the overall mean of ratings.
+
+```{r Method: Only the ratings mean, warning=FALSE, character = TRUE}
+## 1st Model: Only the rating's mean
+
+ratings_mean <- mean(edx$rating)
+
+model_1_prediction <- ratings_mean
+
+# Let's see the RMSE:
+
+RMSE_MODEL_1 <- RMSE(final_holdout_test$rating, model_1_prediction)
+RMSE_MODEL_1
+
+
+```
+
+```{r , echo=FALSE,warning=FALSE, message=FALSE ,character = TRUE}
+rm(model_1_prediction)
+# Let's store the RMSE in a dataframe. The idea is to store all the RMSE there and then we will be able to compare them.
+
+ALL_RMSE <- data_frame(method = "Model Number 1", RMSE = RMSE_MODEL_1)
+
+```
+
+As you can see, the RMSE for this model is quite high. Let's try to improve it.
+
+# Second Model: Movie's effect
+
+In this model, I take into account that some movies have higher ratings than others. To do this, I calculate the movie's impact as the average rating for each movie.
+
+```{r Adding the movie effect, warning=FALSE, character = TRUE}
+
+## 2nd Model: Let's include to the 1st model the movie's effect: 
+
+movies_contribution<- edx %>%
+  dplyr::group_by(movieId) %>% 
+  dplyr::summarize(Mg_contribution_of_movies = mean(rating - ratings_mean))
+
+model_2_prediction <- ratings_mean + final_holdout_test %>%
+  left_join(movies_contribution, by='movieId') %>%
+                      .$Mg_contribution_of_movies
+
+# Let's see the RMSE:
+
+RMSE_MODEL_2 <- RMSE(final_holdout_test$rating, model_2_prediction)
+RMSE_MODEL_2
+
+```
+
+```{r , echo=FALSE,warning=FALSE, message=FALSE ,character = TRUE}
+rm(model_2_prediction)
+
+# Let's add it to the general RMSE dataframe:
+
+ALL_RMSE <- bind_rows(ALL_RMSE, data_frame(method="Model Number 2",
+                                           RMSE = RMSE_MODEL_2 ))
+
+```
+As seen in the results, the RMSE improved between the first and second models, but it still has room for improvement. Now, let's attempt to further reduce the RMSE.
+
+# Third Model: Addition of User effect.
+
+It has been demonstrated that each movie is unique and the inclusion of a "movie impact" is necessary. Similarly, every user is different, so the next model includes both the movie impact and the "user impact." I calculate the user impact as the average rating per user.
+
+```{r  Adding the user effect, warning=FALSE, character = TRUE}
+
+## 3rd Model: Let's include to the 2nd model the user's effect:
+
+user_contribution <- edx %>%
+      left_join(movies_contribution, by='movieId') %>% group_by(userId) %>% 
+      dplyr::summarize(Mg_contribution_of_users = mean(rating - ratings_mean - 
+                                                Mg_contribution_of_movies))
+
+model_3_prediction <- final_holdout_test %>% 
+  left_join(movies_contribution, by='movieId') %>%
+  left_join(user_contribution, by='userId') %>% 
+  mutate(M3_pred = ratings_mean + Mg_contribution_of_movies + 
+           Mg_contribution_of_users) %>%
+  .$M3_pred
+
+# Let's see the RMSE:
+
+RMSE_MODEL_3 <- RMSE(final_holdout_test$rating, model_3_prediction)
+RMSE_MODEL_3
+
+
+```
+
+```{r , echo=FALSE,warning=FALSE, message=FALSE ,character = TRUE}
+rm(model_3_prediction)
+# Let's add it to the general RMSE dataframe:
+
+ALL_RMSE <- bind_rows(ALL_RMSE, data_frame(method="Model Number 3",
+                                           RMSE = RMSE_MODEL_3))
+
+```
+
+As we can observe, the RMSE has improved compared to the previous models, which incorporated only the rating, movie, and user effects. However, we have not yet utilized the genre information. In the final model, we will include the genre attribute and aim to further reduce the RMSE.
+
+# Fourth Model: Addition of Genre Effect.
+
+```{r Adding genres effects, warning=FALSE, character = TRUE}
+## 4th Model: I have already included: Rating's effect (1st model), Movie's effect 
+## (2nd model) and User's effect (3rd model). In this 4th model I will include 
+## the Genre, that is the only variable that I did not use already.
+
+
+# Now, continuing with the method I used in the previous models, let's create the 4th model:
+
+genres_contribution <- edx %>% left_join(movies_contribution, by = "movieId")%>% 
+      left_join(user_contribution, by = "userId") %>% group_by(genres) %>%
+      dplyr::summarize(Mg_contribution_of_genres = mean(rating - ratings_mean -
+      Mg_contribution_of_movies - Mg_contribution_of_users))
+
+
+model_4_prediction <- final_holdout_test %>% 
+                      left_join(movies_contribution, by = "movieId") %>%
+                      left_join(user_contribution, by = "userId") %>% 
+                      left_join(genres_contribution, by = c("genres")) %>%
+                      mutate(M4_pred = ratings_mean + Mg_contribution_of_movies +
+                      Mg_contribution_of_users + Mg_contribution_of_genres) %>%
+                      .$M4_pred
+                     
+
+# Let's see the RMSE:
+
+RMSE_MODEL_4 <- RMSE(final_holdout_test$rating, model_4_prediction)
+RMSE_MODEL_4
+
+
+
+```
+
+```{r , echo=FALSE,warning=FALSE, message=FALSE ,character = TRUE}
+# Let's add it to the general RMSE dataframe:
+
+ALL_RMSE <- bind_rows(ALL_RMSE, data_frame(method="Model Number 4",
+                                           RMSE = RMSE_MODEL_4))
+
+```
+
+With the inclusion of the genre attribute, we have significantly improved the RMSE. This demonstrates that genre is a valuable factor to consider when creating a recommendation model.
+
+## Results section. Resume of the models results.
+
+The four models were demonstrated, starting with the simplest one and ending with the most complex one. The following table showcases the final results of all four models:
+
+```{r  , warning=FALSE, character = TRUE}
+ALL_RMSE
+
+```
+
+The best one:
+```{r , warning=FALSE, character = TRUE}
+print(ALL_RMSE[which.min(ALL_RMSE$RMSE),1])
+
+#The RMSE is approx 0.8649
+
+print(RMSE_MODEL_4)
+
+```
+
+## Conclusion section
+
+The aim of this project was to predict movie ratings based on a large database containing over 10 million evaluations and various features. The approach was to first consider the overall rating of the dataset, then the influence of the movies, followed by the influence of users, and finally the impact of genres on ratings. To prevent overfitting, the dataset was divided into training and validation sets. The best model was found to be the one that took into account the mean general rating, the effect of movies, the effect of users, and the impact of genres. This model achieved an RMSE of `r ALL_RMSE[4,2]`, which is considered a good result according to course standards and can still be improved further.
+
+
+
